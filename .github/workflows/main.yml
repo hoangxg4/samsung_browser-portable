@@ -30,100 +30,89 @@ jobs:
         
         $newVersion = "143.0.0.95"
         if ($asset) {
-            if ($asset.name -match "v?(\d[\d\.]+\d)") { 
-                $newVersion = $matches[1] 
-            }
+            if ($asset.name -match "v?(\d[\d\.]+\d)") { $newVersion = $matches[1] }
             $downloadUrl = $asset.browser_download_url
         }
-        
         $newVersion = $newVersion.Trim().Trim('.')
         $tag = "v$newVersion"
         $zipName = "SamsungBrowser-$newVersion.zip"
 
-        Write-Host "Version: $newVersion"
-
-        # 2. Kiểm tra release
-        if ($env:EVENT_NAME -eq "schedule") {
-            $existing = gh release view $tag 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "Release $tag exists, skipping..."
-                echo "skip=true" >> $env:GITHUB_OUTPUT
-                exit 0
-            }
-        } else {
-            Write-Host "Manual trigger - deleting old release..."
+        # 2. Xử lý Release cũ (nếu chạy thủ công)
+        if ($env:EVENT_NAME -ne "schedule") {
             gh release delete $tag --yes 2>$null
             git push origin :refs/tags/$tag 2>$null
+        } elseif (gh release view $tag 2>$null) {
+            Write-Host "Release $tag already exists. Skipping."
+            echo "skip=true" >> $env:GITHUB_OUTPUT
+            exit 0
         }
 
-        # 3. Tải file
-        curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
-        Write-Host "Downloading..."
+        # 3. Tải và giải nén trình duyệt
+        curl.exe -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
         Invoke-WebRequest -Uri $downloadUrl -OutFile samsung.zip -UserAgent "SamsungBrowser"
         
-        # 4. Giải nén và Xử lý cấu trúc
-        Write-Host "Extracting..."
-        Expand-Archive -Path samsung.zip -DestinationPath temp -Force
+        New-Item -ItemType Directory -Force -Path "temp_raw" | Out-Null
+        Expand-Archive -Path samsung.zip -DestinationPath "temp_raw\l1" -Force
+        $mini = Get-ChildItem -Path "temp_raw\l1" -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
+        & .\7zr.exe x $mini.FullName "-otemp_raw\l2" -y | Out-Null
+        $sevenZ = Get-ChildItem -Path "temp_raw\l2" -Filter "*.7z" -Recurse | Select-Object -First 1
+        & .\7zr.exe x $sevenZ.FullName "-otemp_raw\extracted" -y | Out-Null
         
-        # Tìm và xả mini_installer
-        $mini = Get-ChildItem -Path temp -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
-        & .\7zr.exe x $mini.FullName "-otemp2" -y | Out-Null
-        
-        # Tìm và xả samsunginternet.7z
-        $seven = Get-ChildItem -Path temp2 -Filter "*.7z" -Recurse | Select-Object -First 1
-        & .\7zr.exe x $seven.FullName "-otemp_chrome" -y | Out-Null
-        
-        # Tìm thư mục browser gốc (thường là Chrome-bin bên trong file nén)
-        $sourceDir = Get-ChildItem -Path temp_chrome -Directory -Recurse | Where-Object { $_.Name -eq "Chrome-bin" } | Select-Object -First 1
-        if (-not $sourceDir) {
-            $sourceDir = Get-ChildItem -Path temp_chrome -Directory | Select-Object -First 1
-        }
+        $sourceChromeBin = Get-ChildItem -Path "temp_raw\extracted" -Directory -Recurse | Where-Object { $_.Name -eq "Chrome-bin" } | Select-Object -First 1
 
-        # Tạo thư mục gốc của bộ Portable
+        # 4. Thiết lập cấu trúc Samsung_Browser
         $portableRoot = "SamsungBrowser_Portable"
-        New-Item -Force -Type Directory $portableRoot | Out-Null
-        
-        # Di chuyển và đổi tên thư mục browser thành Samsung_Browser
         $browserDir = Join-Path $portableRoot "Samsung_Browser"
-        Move-Item -Path $sourceDir.FullName -Destination $browserDir -Force
+        New-Item -Force -Type Directory $browserDir | Out-Null
         
-        # 5. Copy các file config VÀO TRONG thư mục Samsung_Browser
-        # Bao gồm chrome++.ini, version.dll (nếu có), v.v.
-        @("chrome++.ini", "version.dll", "chrome++.dll", "debloater.reg", "update.bat") | ForEach-Object {
-            if (Test-Path $_) { 
-                Write-Host "Copying $_ to Samsung_Browser..."
-                Copy-Item $_ $browserDir -Force 
+        # Di chuyển ruột của Chrome-bin vào Samsung_Browser
+        Move-Item -Path "$($sourceChromeBin.FullName)\*" -Destination $browserDir -Force
+
+        # 5. XỬ LÝ MÃ HÓA FILE (FIX LỖI FONT)
+        # Danh sách các file text cần fix encoding
+        $textFiles = @("default-apps-multi-profile.bat", "update.bat", "chrome++.ini", "debloater.reg")
+        
+        foreach ($file in $textFiles) {
+            if (Test-Path $file) {
+                Write-Host "Fixing encoding for $file..."
+                $content = Get-Content -Path $file -Raw
+                
+                # File .bat và .reg nên dùng ASCII hoặc UTF8 (No BOM) để CMD đọc chuẩn
+                if ($file.EndsWith(".bat") -or $file.EndsWith(".reg")) {
+                    $content | Out-File -FilePath (Join-Path $browserDir $file) -Encoding ascii -Force
+                } else {
+                    $content | Out-File -FilePath (Join-Path $browserDir $file) -Encoding utf8 -Force
+                }
             }
         }
-        
-        # Tạo Data và Cache bên trong thư mục browser để đảm bảo tính Portable (tùy chọn)
-        New-Item -Force -Type Directory (Join-Path $browserDir "Data") | Out-Null
-        New-Item -Force -Type Directory (Join-Path $browserDir "Cache") | Out-Null
-        
-        # 6. Nén - Nén thư mục SamsungBrowser_Portable
-        Write-Host "Compressing..."
+
+        # Copy các file nhị phân (như .dll) nếu có
+        if (Test-Path "version.dll") { Copy-Item "version.dll" $browserDir -Force }
+
+        # Tạo sẵn Data/Cache rỗng
+        New-Item -Force -Type Directory (Join-Path $browserDir "Data"), (Join-Path $browserDir "Cache") | Out-Null
+
+        # 6. Đóng gói và Cleanup
         Compress-Archive -Path "$portableRoot/*" -DestinationPath $zipName -Force
+        Remove-Item 7zr.exe, samsung.zip, temp_raw, $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
 
-        # 7. Cleanup
-        Remove-Item 7zr.exe, samsung.zip, temp, temp2, temp_chrome, $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
-
-        # Output
+        # Output variables
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
         echo "version=$newVersion" >> $env:GITHUB_OUTPUT
         echo "zip_path=$zipName" >> $env:GITHUB_OUTPUT
         echo "skip=false" >> $env:GITHUB_OUTPUT
 
-    - name: Push Version Update
+    - name: Push version update
       if: steps.build_step.outputs.skip != 'true'
       run: |
-        git config user.email "github-actions[bot]@users.noreply.github.com"
         git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
         echo "${{ steps.build_step.outputs.version }}" > version.txt
         git add version.txt
-        git commit -m "Build ${{ steps.build_step.outputs.tag }} [skip ci]" --allow-empty
+        git commit -m "Update to ${{ steps.build_step.outputs.tag }} [skip ci]" --allow-empty
         git push origin main
 
-    - name: Create GitHub Release
+    - name: Create Release
       if: steps.build_step.outputs.skip != 'true'
       uses: softprops/action-gh-release@v2
       with:
@@ -131,17 +120,3 @@ jobs:
         name: Samsung Browser ${{ steps.build_step.outputs.version }}
         files: ${{ steps.build_step.outputs.zip_path }}
         token: ${{ secrets.GITHUB_TOKEN }}
-        body: |
-          📥 **Samsung Browser Portable v${{ steps.build_step.outputs.version }}**
-          
-          ### Cấu trúc file:
-          - Đã đổi tên thư mục browser thành `Samsung_Browser`.
-          - Đã tích hợp `chrome++.ini` và các file bổ trợ trực tiếp vào thư mục browser.
-          
-          ### Hướng dẫn:
-          1. Tải file ZIP bên dưới.
-          2. Giải nén.
-          3. Vào thư mục `Samsung_Browser` và chạy `samsunginternet.exe`.
-          
-          ---
-          *Tự động đóng gói bởi CezDev Bot*
