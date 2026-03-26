@@ -19,7 +19,6 @@ jobs:
         $asset = $release.assets | Where-Object { $_.name -match "SamsungInternet_Offline" } | Select-Object -First 1
         
         if ($asset) {
-          # Trích xuất phiên bản từ tên file
           $filename = $asset.name
           if ($filename -match "v?([\d\.]+)") {
             $newVersion = $matches[1]
@@ -27,12 +26,14 @@ jobs:
             $newVersion = "143.0.0.95"
           }
           
-          Write-Host "New version: $newVersion"
-          Write-Host "Download URL: $($asset.browser_download_url)"
+          $downloadUrl = $asset.browser_download_url
           
-          echo "VERSION=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
-          echo "DOWNLOAD_URL=$($asset.browser_download_url)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
-          echo "FILENAME=$filename" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          Write-Host "New version: $newVersion"
+          Write-Host "Download URL: $downloadUrl"
+          
+          "VERSION=$newVersion" | Add-Content -Path $env:GITHUB_OUTPUT
+          "DOWNLOAD_URL=$downloadUrl" | Add-Content -Path $env:GITHUB_OUTPUT
+          "FILENAME=$filename" | Add-Content -Path $env:GITHUB_OUTPUT
         } else {
           Write-Host "Không tìm thấy asset"
           exit 1
@@ -45,43 +46,43 @@ jobs:
           $currentVersion = $currentVersion.Trim()
         }
         Write-Host "Current version: $currentVersion"
-        echo "CURRENT_VERSION=$currentVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+        "CURRENT_VERSION=$currentVersion" | Add-Content -Path $env:GITHUB_OUTPUT
 
         # Kiểm tra release đã tồn tại chưa
         $tag = "v$newVersion"
         try {
           Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{Authorization="Bearer $env:GITHUB_TOKEN"} -ErrorAction Stop
-          echo "EXISTS=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          Write-Host "Release đã tồn tại"
+          "EXISTS=true" | Add-Content -Path $env:GITHUB_OUTPUT
         } catch {
-          echo "EXISTS=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          Write-Host "Release chưa tồn tại, sẽ tạo mới"
+          "EXISTS=false" | Add-Content -Path $env:GITHUB_OUTPUT
         }
 
     - uses: actions/checkout@v4
-      if: env.EXISTS == 'false'
+      if: steps.check.outputs.EXISTS == 'false'
 
     - name: Download 7zr
-      if: env.EXISTS == 'false'
+      if: steps.check.outputs.EXISTS == 'false'
       shell: pwsh
       run: |
         curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
 
     - name: Download Samsung Browser
-      if: env.EXISTS == 'false'
+      if: steps.check.outputs.EXISTS == 'false'
       shell: pwsh
       run: |
-        $version = "${{ env.VERSION }}"
-        $filename = "${{ env.FILENAME }}"
-        Write-Host "Đang tải $filename..."
+        Write-Host "Đang tải ${{ env.FILENAME }}..."
         curl -sSL "${{ env.DOWNLOAD_URL }}" -o samsung_offline.zip
         Write-Host "Tải hoàn tất!"
 
     - name: Extract and Build
-      if: env.EXISTS == 'false'
+      if: steps.check.outputs.EXISTS == 'false'
       shell: pwsh
       run: |
         $version = "${{ env.VERSION }}"
         
-        # Giải nén file zip đầu tiên (chứa mini_installer.exe)
+        # Giải nén file zip đầu tiên
         Write-Host "Đang giải nén..."
         Expand-Archive -Path samsung_offline.zip -DestinationPath temp_installer -Force
 
@@ -93,7 +94,7 @@ jobs:
         }
         Write-Host "Tìm thấy: $($miniInstaller.Name)"
 
-        # Giải nén mini_installer để lấy samsunginternet.7z
+        # Giải nén mini_installer
         Write-Host "Đang giải nén mini_installer..."
         New-Item -Force -Type Directory temp_extract | Out-Null
         & .\7zr.exe x $miniInstaller.FullName "-otemp_extract" -y | Out-Null
@@ -123,8 +124,6 @@ jobs:
 
         # Tạo thư mục SamsungBrowser-Portable
         New-Item -Force -Type Directory SamsungBrowser-Portable | Out-Null
-
-        # Di chuyển Chrome-bin vào
         Move-Item -Path Chrome-bin -Destination SamsungBrowser-Portable/ -Force
 
         # Copy các file cấu hình
@@ -159,9 +158,9 @@ jobs:
         Remove-Item temp_extract -Recurse -Force -ErrorAction SilentlyContinue
 
     - name: Release
-      if: env.EXISTS == 'false'
+      if: steps.check.outputs.EXISTS == 'false'
       uses: softprops/action-gh-release@v2
-      with: |
+      with:
         files: SamsungBrowser-Portable-v${{ env.VERSION }}.zip
         tag_name: v${{ env.VERSION }}
         name: Samsung Browser Portable v${{ env.VERSION }}
