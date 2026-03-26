@@ -1,83 +1,190 @@
-name: Check Update & Auto Release Samsung Browser
+name: Build Samsung Browser Portable
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Chạy mỗi 6 tiếng
-  workflow_dispatch:  # Cho phép chạy thủ công
-
-permissions:
-  contents: write
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
-  check-and-release:
+  build:
     runs-on: windows-latest
-
+    
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Dependencies
-        run: pip install requests urllib3
-
-      - name: Run Update Script
-        id: updater
-        run: python samsung_update.py
-
-      - name: Commit version.txt
-        if: steps.updater.outputs.update_found == 'true'
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add version.txt
-          git commit -m "🚀 Auto-update phiên bản v${{ steps.updater.outputs.version }}"
-
-      - name: Create Portable Package
-        if: steps.updater.outputs.update_found == 'true'
-        run: |
-          # Chạy build script để tạo thư mục Chrome-bin
-          powershell -ExecutionPolicy Bypass -File build.ps1
-          
-          # Di chuyển Chrome-bin ra ngoài
-          if (Test-Path "Chrome-bin") {
-            Compress-Archive -Path "Chrome-bin\*" -DestinationPath "SamsungBrowser-Portable-v${{ steps.updater.outputs.version }}.zip" -Force
+    - name: Check versions and release
+      id: check
+      shell: pwsh
+      run: |
+        # Lấy phiên bản mới nhất từ Samsung server
+        $body = @{
+          request = @{
+            "@os" = "win"
+            "@updater" = "updater"
+            acceptformat = "crx3,download,puff,run,xz,zucc"
+            apps = @(@{
+              appid = "ohpjbciplfdockeiligelcjnkiejldpn"
+              enabled = $true
+              installdate = -1
+              installsource = "taggedmi"
+              updatecheck = @{sameversionupdate = $true}
+              version = "0.0.0.0"
+            })
+            arch = "x64"
+            dedup = "cr"
+            domainjoined = $false
+            hw = @{avx = $true; physmemory = 16; sse = $true; sse2 = $true; sse3 = $true; sse41 = $true; sse42 = $true; ssse3 = $true}
+            ismachine = $true
+            os = @{arch = "x86_64"; platform = "Windows"; version = "10.0.26200.8037"}
+            prodversion = "143.0.7499.194"
+            protocol = "4.0"
+            requestid = "{" + [guid]::NewGuid().ToString() + "}"
+            sessionid = "{" + [guid]::NewGuid().ToString() + "}"
+            updaterversion = "143.0.7499.194"
           }
+        } | ConvertTo-Json -Depth 10
 
-      - name: Upload Chrome-bin as Artifact
-        if: steps.updater.outputs.update_found == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Chrome-bin
-          path: Chrome-bin
-          retention-days: 7
+        $headers = @{
+          "Content-Type" = "application/json"
+          "User-Agent" = "SamsungInternetUpdater 143.0.0.8"
+          "X-Goog-Update-AppId" = "ohpjbciplfdockeiligelcjnkiejldpn"
+        }
 
-      - name: Create Release
-        if: steps.updater.outputs.update_found == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.updater.outputs.version }}
-          name: "Samsung Browser Portable v${{ steps.updater.outputs.version }}"
-          body: |
-            🤖 **Bản phát hành tự động**
-            
-            - Phiên bản: `${{ steps.updater.outputs.version }}`
-            - File Chrome-bin đã được giải nén sẵn
-            - Đã tích hợp WidevineCdm folder
-            - Chạy `install-widevine.bat` để cài đặt Widevine DRM
-            
-            ## Hướng dẫn sử dụng:
-            1. Giải nén file zip
-           2. Chạy `install-widevine.bat` để cài Widevine
-           3. Chạy `SamsungBrowser.lnk` để khởi động
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        $response = Invoke-RestMethod -Uri "https://update.internet.apps.samsung.com/service/update2/json" -Method Post -Body $body -Headers $headers -UseBasicParsing
+        $newVersion = $response.response.apps[0].updatecheck.nextversion
+        $downloadUrl = $response.response.apps[0].updatecheck.pipelines[0].operations[0].urls[0].url
 
-      - name: Push Changes
-        if: steps.updater.outputs.update_found == 'true'
-        run: git push
+        echo "VERSION=$newVersion" >> $env:GITHUB_ENV
+        echo "DOWNLOAD_URL=$downloadUrl" >> $env:GITHUB_ENV
+
+        # Kiểm tra phiên bản hiện tại
+        $currentVersion = ""
+        if (Test-Path "version.txt") {
+          $currentVersion = Get-Content "version.txt" -Raw -ErrorAction SilentlyContinue
+          $currentVersion = $currentVersion.Trim()
+        }
+
+        echo "CURRENT_VERSION=$currentVersion" >> $env:GITHUB_ENV
+
+        # Kiểm tra release đã tồn tại chưa
+        $tag = "v$newVersion"
+        try {
+          Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{Authorization="Bearer $env:GITHUB_TOKEN"} -ErrorAction Stop
+          echo "EXISTS=true" >> $env:GITHUB_ENV
+        } catch {
+          echo "EXISTS=false" >> $env:GITHUB_ENV
+        }
+
+    - uses: actions/checkout@v4
+      if: env.EXISTS == 'false'
+
+    - name: Download 7zr
+      if: env.EXISTS == 'false'
+      shell: pwsh
+      run: |
+        curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
+
+    - name: Download Samsung Browser
+      if: env.EXISTS == 'false'
+      shell: pwsh
+      run: |
+        Write-Host "Đang tải Samsung Browser v${{ env.VERSION }}..."
+        curl -sSL "${{ env.DOWNLOAD_URL }}" -o samsung_offline.zip
+        Write-Host "Tải hoàn tất!"
+
+    - name: Extract and Build
+      if: env.EXISTS == 'false'
+      shell: pwsh
+      run: |
+        # Giải nén file zip đầu tiên
+        Write-Host "Đang giải nén..."
+        Expand-Archive -Path samsung_offline.zip -DestinationPath temp_installer -Force
+
+        # Tìm mini_installer.exe
+        $miniInstaller = Get-ChildItem -Path temp_installer -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
+        if (-not $miniInstaller) {
+          Write-Host "Không tìm thấy mini_installer.exe"
+          exit 1
+        }
+        Write-Host "Tìm thấy: $($miniInstaller.Name)"
+
+        # Giải nén mini_installer
+        Write-Host "Đang giải nén mini_installer..."
+        & .\7zr.exe x $miniInstaller.FullName "-otemp_extract" -y | Out-Null
+
+        # Tìm samsunginternet.7z
+        $sevenZip = Get-ChildItem -Path temp_extract -Filter "samsunginternet.7z" -Recurse | Select-Object -First 1
+        if (-not $sevenZip) {
+          # Thử tìm trong thư mục khác
+          $sevenZip = Get-ChildItem -Path temp_installer -Filter "*.7z" -Recurse | Select-Object -First 1
+        }
+
+        if (-not $sevenZip) {
+          Write-Host "Không tìm thấy samsunginternet.7z"
+          exit 1
+        }
+        Write-Host "Tìm thấy: $($sevenZip.Name)"
+
+        # Giải nén samsunginternet.7z -> Chrome-bin
+        Write-Host "Đang giải nén samsunginternet.7z..."
+        New-Item -Force -Type Directory Chrome-bin | Out-Null
+        & .\7zr.exe x $sevenZip.FullName "-oChrome-bin" -y | Out-Null
+
+        # Kiểm tra kết quả
+        $exeFiles = Get-ChildItem -Path Chrome-bin -Filter "*.exe" -Recurse | Where-Object { $_.Name -match "samsunginternet" }
+        if ($exeFiles) {
+          Write-Host "Tìm thấy: $($exeFiles[0].Name)"
+        }
+
+        # Tạo thư mục SamsungBrowser-Portable
+        New-Item -Force -Type Directory SamsungBrowser-Portable | Out-Null
+
+        # Di chuyển Chrome-bin vào
+        Move-Item -Path Chrome-bin -Destination SamsungBrowser-Portable/ -Force
+
+        # Copy các file cấu hình
+        Copy-Item chrome++.ini SamsungBrowser-Portable/ -Force
+        Copy-Item debloater.reg SamsungBrowser-Portable/ -Force
+        Copy-Item default-apps.bat SamsungBrowser-Portable/ -Force
+        Copy-Item update.bat SamsungBrowser-Portable/ -Force
+        Copy-Item install-widevine.bat SamsungBrowser-Portable/ -Force
+        Copy-Item index.html SamsungBrowser-Portable/ -Force
+
+        # Copy WidevineCdm
+        Copy-Item WidevineCdm SamsungBrowser-Portable/ -Recurse -Force
+
+        # Tạo thư mục Data và Cache
+        New-Item -Force -Type Directory SamsungBrowser-Portable/Data | Out-Null
+        New-Item -Force -Type Directory SamsungBrowser-Portable/Cache | Out-Null
+
+        # Lưu phiên bản
+        ${{ env.VERSION }} | Out-File -FilePath version.txt -Encoding UTF8
+
+        # Nén thành zip
+        Write-Host "Đang nén file..."
+        Compress-Archive -Path SamsungBrowser-Portable "SamsungBrowser-Portable-v${{ env.VERSION }}.zip" -Force
+        Write-Host "Nén hoàn tất!"
+
+        # Cleanup
+        Remove-Item samsung_offline.zip -Force -ErrorAction SilentlyContinue
+        Remove-Item temp_installer -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item temp_extract -Recurse -Force -ErrorAction SilentlyContinue
+
+    - name: Release
+      if: env.EXISTS == 'false'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: SamsungBrowser-Portable-v${{ env.VERSION }}.zip
+        tag_name: v${{ env.VERSION }}
+        name: Samsung Browser Portable v${{ env.VERSION }}
+        body: |
+          🤖 **Bản phát hành tự động**
+          
+          - Phiên bản: `${{ env.VERSION }}`
+          - Đã tích hợp WidevineCdm folder
+          - Chạy `install-widevine.bat` để cài đặt Widevine DRM
+          
+          ## Hướng dẫn sử dụng:
+          1. Giải nén file zip
+          2. Chạy `install-widevine.bat` để cài Widevine
+          3. Khởi động trình duyệt!
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
