@@ -16,6 +16,7 @@ jobs:
       run: curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
 
     - name: Build and Release
+      id: build
       shell: pwsh
       run: |
         # Lấy phiên bản mới nhất từ samsung_browser-offline-installer
@@ -31,21 +32,14 @@ jobs:
           $downloadUrl = $asset.browser_download_url
         }
         
+        $tagName = "v$newVersion"
+        Write-Host "##vso[task.setvariable variable=tag;]$tagName"
         Write-Host "Target version: $newVersion"
-        Write-Host "Download URL: $downloadUrl"
-        
-        # Kiểm tra phiên bản hiện tại
-        $currentVersion = ""
-        if (Test-Path "version.txt") {
-          $currentVersion = Get-Content "version.txt" -Raw -ErrorAction SilentlyContinue
-          $currentVersion = $currentVersion.Trim()
-        }
-        Write-Host "Current version: '$currentVersion'"
+        Write-Host "Tag: $tagName"
         
         # Kiểm tra release đã tồn tại chưa
-        $tag = "v$newVersion"
         try {
-          $existingRelease = Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"} -ErrorAction Stop
+          $existingRelease = Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tagName" -Headers @{Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"} -ErrorAction Stop
           Write-Host "Release already exists, skipping..."
           exit 0
         } catch {
@@ -98,13 +92,14 @@ jobs:
         # Cleanup
         Remove-Item samsung.zip,temp,temp2 -Recurse -Force -ErrorAction SilentlyContinue
         
-        # Release
-        Write-Host "Creating release..."
-        
+        Write-Host "Done!"
+
     - name: Release
       uses: softprops/action-gh-release@v2
       with:
         files: SamsungBrowser-*.zip
+        tag_name: ${{ steps.build.outputs.tag }}
+        name: Samsung Browser ${{ steps.build.outputs.tag }}
         body: |
           📥 **Tải về, giải nén và dùng ngay!**
           
