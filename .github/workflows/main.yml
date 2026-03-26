@@ -14,11 +14,14 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Setup GitHub CLI
+      run: |
+        gh --version || winget install github.cli --accept-source-agreements --accept-package-agreements
+
     - name: Download 7zr
       run: curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
 
-    - name: Build
-      id: build
+    - name: Build and Release
       shell: pwsh
       run: |
         # Lấy phiên bản mới nhất
@@ -33,7 +36,16 @@ jobs:
           $downloadUrl = $asset.browser_download_url
         }
         
+        $tag = "v$newVersion"
         Write-Host "Version: $newVersion"
+        Write-Host "Tag: $tag"
+        
+        # Kiểm tra release đã tồn tại
+        $existing = gh release view $tag 2>$null
+        if ($existing) {
+          Write-Host "Release $tag already exists, skipping..."
+          exit 0
+        }
         
         # Lưu version
         Set-Content -Path version.txt -Value $newVersion -Encoding utf8
@@ -66,25 +78,23 @@ jobs:
         # Cleanup
         Remove-Item samsung.zip,temp,temp2 -Recurse -Force -ErrorAction SilentlyContinue
         
-        # Commit version
+        # Commit
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git config user.name "github-actions[bot]"
         git add version.txt
-        git commit -m "Release v$newVersion"
+        git commit -m "Release $tag"
         git push
         
-        Write-Host "Build complete!"
+        # Tạo tag
+        git tag $tag
+        git push origin $tag
+        
+        # Tạo release bằng gh
+        gh release create $tag $zipName --title "Samsung Browser $newVersion" --notes "📥 **Tải về, giải nén và dùng ngay!**
 
-    - name: Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: SamsungBrowser-*.zip
-        body: |
-          📥 **Tải về, giải nén và dùng ngay!**
-          
-          ### Hướng dẫn:
-          1. Tải file zip ở dưới
-          2. Giải nén
-          3. Chạy `SamsungBrowser.exe` hoặc vào `Chrome-bin` chạy `samsunginternet.exe`
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+### Hướng dẫn:
+1. Tải file zip ở dưới
+2. Giải nén
+3. Chạy `SamsungBrowser.exe` hoặc vào `Chrome-bin` chạy `samsunginternet.exe`"
+        
+        Write-Host "Done!"
