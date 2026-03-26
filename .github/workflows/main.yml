@@ -1,0 +1,83 @@
+name: Check Update & Auto Release Samsung Browser
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Chạy mỗi 6 tiếng
+  workflow_dispatch:  # Cho phép chạy thủ công
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install requests urllib3
+
+      - name: Run Update Script
+        id: updater
+        run: python samsung_update.py
+
+      - name: Commit version.txt
+        if: steps.updater.outputs.update_found == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add version.txt
+          git commit -m "🚀 Auto-update phiên bản v${{ steps.updater.outputs.version }}"
+
+      - name: Create Portable Package
+        if: steps.updater.outputs.update_found == 'true'
+        run: |
+          # Chạy build script để tạo thư mục Chrome-bin
+          powershell -ExecutionPolicy Bypass -File build.ps1
+          
+          # Di chuyển Chrome-bin ra ngoài
+          if (Test-Path "Chrome-bin") {
+            Compress-Archive -Path "Chrome-bin\*" -DestinationPath "SamsungBrowser-Portable-v${{ steps.updater.outputs.version }}.zip" -Force
+          }
+
+      - name: Upload Chrome-bin as Artifact
+        if: steps.updater.outputs.update_found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chrome-bin
+          path: Chrome-bin
+          retention-days: 7
+
+      - name: Create Release
+        if: steps.updater.outputs.update_found == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.updater.outputs.version }}
+          name: "Samsung Browser Portable v${{ steps.updater.outputs.version }}"
+          body: |
+            🤖 **Bản phát hành tự động**
+            
+            - Phiên bản: `${{ steps.updater.outputs.version }}`
+            - File Chrome-bin đã được giải nén sẵn
+            - Đã tích hợp WidevineCdm folder
+            - Chạy `install-widevine.bat` để cài đặt Widevine DRM
+            
+            ## Hướng dẫn sử dụng:
+            1. Giải nén file zip
+           2. Chạy `install-widevine.bat` để cài Widevine
+           3. Chạy `SamsungBrowser.lnk` để khởi động
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Changes
+        if: steps.updater.outputs.update_found == 'true'
+        run: git push

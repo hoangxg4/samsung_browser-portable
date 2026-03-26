@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Samsung Browser Portable</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #1a1a2e;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            background: #16213e;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #0f3460 0%, #16213e 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            color: #888;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 25px;
+            background: #0f3460;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .section h2 {
+            color: #00d9ff;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section h2::before {
+            content: "▸";
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .feature-item {
+            background: rgba(0, 217, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 217, 255, 0.2);
+        }
+
+        .feature-item strong {
+            color: #00d9ff;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .feature-item span {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .btn {
+            display: block;
+            padding: 15px 25px;
+            border-radius: 8px;
+            text-align: center;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00d9ff, #00ff88);
+            color: #0f3460;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 2px solid #00d9ff;
+            color: #00d9ff;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(0, 217, 255, 0.1);
+        }
+
+        .btn-warning {
+            background: #ff6b35;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #ff8c5a;
+        }
+
+        .files-info {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.9rem;
+            color: #aaa;
+        }
+
+        .files-info ul {
+            list-style: none;
+            margin-top: 10px;
+        }
+
+        .files-info li {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .files-info li:last-child {
+            border-bottom: none;
+        }
+
+        .files-info .highlight {
+            color: #00ff88;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .footer a {
+            color: #00d9ff;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Samsung Browser Portable</h1>
+            <p>Phiên bản Portable với Chrome++ và Widevine DRM</p>
+        </div>
+
+        <div class="content">
+            <div class="section">
+                <h2>Tính năng</h2>
+                <div class="features">
+                    <div class="feature-item">
+                        <strong>Chrome++</strong>
+                        <span>Tính năng mở rộng cho trình duyệt Chromium</span>
+                    </div>
+                    <div class="feature-item">
+                        <strong>Widevine DRM</strong>
+                        <span>Hỗ trợ Netflix, Disney+, Spotify</span>
+                    </div>
+                    <div class="feature-item">
+                        <strong>Portable</strong>
+                        <span>Dữ liệu lưu cục bộ, có thể mang theo</span>
+                    </div>
+                    <div class="feature-item">
+                        <strong>Debloat</strong>
+                        <span>Tối ưu hiệu năng, tăng quyền riêng tư</span>
+                    </div>
+                    <div class="feature-item">
+                        <strong>Auto Update</strong>
+                        <span>Tự động cập nhật phiên bản mới</span>
+                    </div>
+                    <div class="feature-item">
+                        <strong>Hỗ trợ MV2</strong>
+                        <span>Tiếp tục hỗ trợ tiện ích Manifest V2</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Hướng dẫn sử dụng</h2>
+                <div class="files-info">
+                    <strong>Các file và công dụng:</strong>
+                    <ul>
+                        <li><span class="highlight">build.bat</span> - Tải và cài đặt Samsung Browser lần đầu</li>
+                        <li><span class="highlight">update.bat</span> - Cập nhật lên phiên bản mới nhất</li>
+                        <li><span class="highlight">install-widevine.bat</span> - Cài đặt/tái cài Widevine DRM</li>
+                        <li><span class="highlight">default-apps.bat</span> - Đặt làm trình duyệt mặc định</li>
+                        <li><span class="highlight">chrome++.ini</span> - Cấu hình Chrome++</li>
+                        <li><span class="highlight">debloater.reg</span> - Tối ưu hóa Registry</li>
+                        <li><span class="highlight">SamsungBrowser.lnk</span> - Shortcut khởi động nhanh</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="buttons">
+                <a href="SamsungBrowser.lnk" class="btn btn-primary">🚀 Khởi động trình duyệt</a>
+                <a href="build.bat" class="btn btn-secondary">⬇️ Tải & Cài đặt</a>
+                <a href="update.bat" class="btn btn-warning">🔄 Kiểm tra cập nhật</a>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Dựa trên <a href="https://github.com/bibicadotnet/chromium-hibbiki-portable" target="_blank">Chromium Hibbiki Portable</a></p>
+            <p>File cài đặt từ <a href="https://github.com/hoangxg4/samsung_browser-offline-installer" target="_blank">Samsung Browser Offline</a></p>
+        </div>
+    </div>
+</body>
+</html>
