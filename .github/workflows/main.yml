@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    # Thêm permissions để GitHub Actions có quyền tạo release và đẩy code
     permissions:
       contents: write
     
@@ -17,82 +16,76 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Setup GitHub CLI
-      run: |
-        gh --version || winget install github.cli --accept-source-agreements --accept-package-agreements
-
-    - name: Download 7zr
-      run: curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
-
-    - name: Build and Release
+    - name: Build Logic
+      id: build_step
       shell: pwsh
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        EVENT_NAME: ${{ github.event_name }}
       run: |
-        # 1. Lấy thông tin phiên bản
+        # 1. Lấy version & Clean
         $release = Invoke-RestMethod "https://api.github.com/repos/hoangxg4/samsung_browser-offline-installer/releases/latest"
         $asset = $release.assets | Where-Object { $_.name -match "SamsungInternet_Offline" } | Select-Object -First 1
         
         $newVersion = "143.0.0.95"
         if ($asset) {
-            if ($asset.name -match "v?([\d\.]+)") {
-                $newVersion = $matches[1]
-            }
+            if ($asset.name -match "v?(\d[\d\.]+\d)") { $newVersion = $matches[1] }
             $downloadUrl = $asset.browser_download_url
         }
-        
+        $newVersion = $newVersion.Trim().Trim('.')
         $tag = "v$newVersion"
-        Write-Host "Target Version: $newVersion"
-        
-        # 2. Kiểm tra release tồn tại (Sử dụng try/catch để tránh lỗi dừng workflow)
-        $existing = gh release view $tag 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $tag already exists, skipping..."
-            exit 0
+
+        # 2. Check trùng (Chỉ cho Cron)
+        if ($env:EVENT_NAME -eq "schedule") {
+            $exists = git ls-remote --tags origin $tag
+            if ($exists) {
+                Write-Host "Version $tag already exists. Skipping..."
+                echo "skip=true" >> $env:GITHUB_OUTPUT
+                exit 0
+            }
         }
-        
-        # 3. Chuẩn bị file và xử lý
-        Set-Content -Path version.txt -Value $newVersion -Encoding utf8
-        Write-Host "Downloading from $downloadUrl..."
+
+        # 3. Download & Process
+        curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
         Invoke-WebRequest -Uri $downloadUrl -OutFile samsung.zip -UserAgent "SamsungBrowser"
-        
-        Write-Host "Extracting..."
         Expand-Archive -Path samsung.zip -DestinationPath temp -Force
         $mini = Get-ChildItem -Path temp -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
         & .\7zr.exe x $mini.FullName "-otemp2" -y | Out-Null
-        
         $seven = Get-ChildItem -Path temp2 -Filter "*.7z" -Recurse | Select-Object -First 1
         & .\7zr.exe x $seven.FullName "-oChrome-bin" -y | Out-Null
         
         New-Item -Force -Type Directory SamsungBrowser | Out-Null
         Move-Item -Path Chrome-bin SamsungBrowser/ -Force
-        
-        # Lưu ý: Các file chrome++.ini, debloater.reg, update.bat phải có sẵn trong repo
         Copy-Item chrome++.ini,debloater.reg,update.bat SamsungBrowser/ -Force -ErrorAction SilentlyContinue
-        New-Item -Force -Type Directory SamsungBrowser/Data,SamsungBrowser/Cache | Out-Null
         
         $zipName = "SamsungBrowser-$newVersion.zip"
         Compress-Archive -Path SamsungBrowser $zipName -Force
-        
-        # 4. Git Push & Tag
+
+        # 4. Output variables để dùng cho step sau
+        echo "tag=$tag" >> $env:GITHUB_OUTPUT
+        echo "version=$newVersion" >> $env:GITHUB_OUTPUT
+        echo "zip_path=$zipName" >> $env:GITHUB_OUTPUT
+        echo "skip=false" >> $env:GITHUB_OUTPUT
+
+    - name: Push Version File
+      if: steps.build_step.outputs.skip != 'true'
+      run: |
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git config user.name "github-actions[bot]"
+        echo "${{ steps.build_step.outputs.version }}" > version.txt
         git add version.txt
-        git commit -m "Release $tag"
-        git push
-        git tag $tag
-        git push origin $tag
-        
-        # 5. Tạo Release (Fix lỗi YAML bằng cách gán note vào biến)
-        $releaseNotes = @"
-        📥 **Tải về, giải nén và dùng ngay!**
+        git commit -m "Update to ${{ steps.build_step.outputs.tag }} [skip ci]" --allow-empty
+        git push origin main
 
-        ### Hướng dẫn:
-        1. Tải file zip bên dưới.
-        2. Giải nén.
-        3. Chạy SamsungBrowser.exe hoặc vào Chrome-bin chạy samsunginternet.exe.
-        "@
-
-        gh release create $tag $zipName --title "Samsung Browser $newVersion" --notes "$releaseNotes"
-        
-        Write-Host "Successfully built and released $tag"
+    - name: Create GitHub Release
+      if: steps.build_step.outputs.skip != 'true'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.build_step.outputs.tag }}
+        name: Samsung Browser ${{ steps.build_step.outputs.version }}
+        files: ${{ steps.build_step.outputs.zip_path }}
+        body: |
+          📥 **Samsung Browser Portable v${{ steps.build_step.outputs.version }}**
+          - Tải về và sử dụng ngay.
+          - Build date: ${{ github.event.repository.updated_at }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+        generate_release_notes: true
