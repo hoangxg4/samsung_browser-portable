@@ -10,8 +10,8 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - name: Check versions
-      id: check
+    - name: Get latest version
+      id: version
       shell: pwsh
       run: |
         $release = Invoke-RestMethod "https://api.github.com/repos/hoangxg4/samsung_browser-offline-installer/releases/latest"
@@ -25,59 +25,72 @@ jobs:
             $newVersion = "143.0.0.95"
           }
           
-          "VERSION=$newVersion" | Add-Content -Path $env:GITHUB_OUTPUT
-          "DOWNLOAD_URL=$($asset.browser_download_url)" | Add-Content -Path $env:GITHUB_OUTPUT
-          "FILENAME=$filename" | Add-Content -Path $env:GITHUB_OUTPUT
-        } else {
-          Write-Host "Không tìm thấy asset"
-          exit 1
+          Write-Host "##vso[task.setvariable variable=version;]$newVersion"
+          Write-Host "##vso[task.setvariable variable=downloadUrl;]$($asset.browser_download_url)"
+          Write-Host "Version: $newVersion"
+          Write-Host "Download URL: $($asset.browser_download_url)"
         }
 
+    - name: Check current version
+      id: current
+      shell: pwsh
+      run: |
         $currentVersion = ""
         if (Test-Path "version.txt") {
           $currentVersion = Get-Content "version.txt" -Raw -ErrorAction SilentlyContinue
           $currentVersion = $currentVersion.Trim()
         }
-        "CURRENT_VERSION=$currentVersion" | Add-Content -Path $env:GITHUB_OUTPUT
-
-        $tag = "v$newVersion"
+        Write-Host "##vso[task.setvariable variable=currentVersion;]$currentVersion"
+        Write-Host "Current version: '$currentVersion'"
+        
+        $tag = "v${{ steps.version.outputs.version }}"
         try {
-          Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{Authorization="Bearer $env:GITHUB_TOKEN"} -ErrorAction Stop
-          "EXISTS=true" | Add-Content -Path $env:GITHUB_OUTPUT
+          Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"} -ErrorAction Stop
+          Write-Host "##vso[task.setvariable variable=exists;]true"
+          Write-Host "Release already exists"
         } catch {
-          "EXISTS=false" | Add-Content -Path $env:GITHUB_OUTPUT
+          Write-Host "##vso[task.setvariable variable=exists;]false"
+          Write-Host "Release does not exist, will create new"
         }
 
     - uses: actions/checkout@v4
-      if: steps.check.outputs.EXISTS == 'false'
+      if: steps.current.outputs.exists == 'false'
 
     - name: Download 7zr
-      if: steps.check.outputs.EXISTS == 'false'
+      if: steps.current.outputs.exists == 'false'
       run: curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
 
     - name: Download Samsung Browser
-      if: steps.check.outputs.EXISTS == 'false'
-      run: curl -sSL "${{ env.DOWNLOAD_URL }}" -o samsung.zip
+      if: steps.current.outputs.exists == 'false'
+      run: curl -sSL "${{ steps.version.outputs.downloadUrl }}" -o samsung.zip
 
-    - name: Extract
-      if: steps.check.outputs.EXISTS == 'false'
+    - name: Extract and Build
+      if: steps.current.outputs.exists == 'false'
       shell: pwsh
       run: |
-        $version = "${{ env.VERSION }}"
+        $version = "${{ steps.version.outputs.version }}"
         
         # Giải nén samsung.zip
         Expand-Archive -Path samsung.zip -DestinationPath temp -Force
         
         # Tìm mini_installer.exe
         $mini = Get-ChildItem -Path temp -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
-        if (-not $mini) { exit 1 }
+        if (-not $mini) { 
+          Write-Host "Không tìm thấy mini_installer.exe"
+          exit 1 
+        }
+        Write-Host "Found: $($mini.Name)"
         
         # Giải nén mini_installer
         & .\7zr.exe x $mini.FullName "-otemp2" -y | Out-Null
         
         # Tìm samsunginternet.7z
         $seven = Get-ChildItem -Path temp2 -Filter "*.7z" -Recurse | Select-Object -First 1
-        if (-not $seven) { exit 1 }
+        if (-not $seven) { 
+          Write-Host "Không tìm thấy samsunginternet.7z"
+          exit 1 
+        }
+        Write-Host "Found: $($seven.Name)"
         
         # Giải nén samsunginternet.7z -> Chrome-bin
         & .\7zr.exe x $seven.FullName "-oChrome-bin" -y | Out-Null
@@ -98,26 +111,27 @@ jobs:
         # Lưu version
         Set-Content -Path version.txt -Value $version -Encoding utf8
         
-        # Nén - giống Hibiki: SamsungBrowser-v1.2.3.4.zip
+        # Nén
         $zipName = "SamsungBrowser-$version.zip"
         Compress-Archive -Path SamsungBrowser $zipName -Force
+        Write-Host "Created: $zipName"
         
         # Cleanup
         Remove-Item samsung.zip,temp,temp2 -Recurse -Force -ErrorAction SilentlyContinue
 
     - name: Release
-      if: steps.check.outputs.EXISTS == 'false'
+      if: steps.current.outputs.exists == 'false'
       uses: softprops/action-gh-release@v2
       with:
-        files: SamsungBrowser-${{ env.VERSION }}.zip
-        tag_name: v${{ env.VERSION }}
-        name: Samsung Browser v${{ env.VERSION }}
+        files: SamsungBrowser-${{ steps.version.outputs.version }}.zip
+        tag_name: v${{ steps.version.outputs.version }}
+        name: Samsung Browser v${{ steps.version.outputs.version }}
         body: |
           📥 **Tải về, giải nén và dùng ngay!**
           
           ### Hướng dẫn:
           1. Tải file zip ở dưới
           2. Giải nén
-          3. Chạy `SamsungBrowser.exe` (hoặc vào Chrome-bin chạy samsunginternet.exe)
+          3. Chạy `SamsungBrowser.exe` hoặc vào `Chrome-bin` chạy `samsunginternet.exe`
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
