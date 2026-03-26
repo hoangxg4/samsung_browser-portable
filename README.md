@@ -1,31 +1,66 @@
-# Samsung Browser Portable
+# 🌐 Samsung Browser Portable (Windows)
 
-Samsung Internet Browser phiên bản Portable với Chrome++ và Widevine.
+Phiên bản **Samsung Internet Browser** dành cho máy tính (Windows), được đóng gói dưới dạng **Portable** (không cần cài đặt), tích hợp các công cụ tối ưu hiệu năng và bảo mật.
 
-## Tải về
+---
 
-Tải phiên bản mới nhất tại: https://github.com/hoangxg4/samsung_browser-portable/releases
+## ✨ Tính năng nổi bật
 
-## Hướng dẫn
+- 🚀 **Portable 100%**: Toàn bộ dữ liệu người dùng (Bookmark, mật khẩu, lịch sử) lưu tại thư mục `Data`. Không để lại rác trong hệ thống.
+- 🛠️ **Chrome++ Tích hợp**: Hỗ trợ tinh chỉnh hệ thống, chặn quảng cáo và tối ưu nhân Chromium.
+- 🎬 **Widevine DRM**: Hỗ trợ xem nội dung bản quyền độ phân giải cao (Netflix, Disney+, Spotify, HBO Max...).
+- 🛡️ **Privacy Debloat**: Loại bỏ các dịch vụ theo dõi (Telemetries), AI không cần thiết và thu thập dữ liệu ẩn từ Google/Samsung.
+- ⚡ **Cloudflare Gateway**: Tích hợp sẵn DoH Cloudflare để tăng tốc truy cập và bảo mật kết nối.
 
-1. Tải file `SamsungBrowser-X.X.X.X.zip` từ Release
-2. Giải nén
-3. Chạy `SamsungBrowser.exe` hoặc vào thư mục `Chrome-bin` chạy `samsunginternet.exe`
+---
 
-## Các file
+## 📥 Tải về
 
-- `chrome++.ini` - Cấu hình Chrome++
-- `debloater.reg` - Tối ưu Registry (chạy bằng Admin nếu muốn)
-- `update.bat` - Cập nhật phiên bản mới
+Bạn luôn có thể tải phiên bản mới nhất tại:
+👉 **[Samsung Browser Releases](https://github.com/hoangxg4/samsung_browser-portable/releases)**
 
-## Tính năng
+---
 
-- Chrome++ tích hợp
-- Widevine DRM (hỗ trợ Netflix, Disney+)
-- Portable - dữ liệu lưu cục bộ
-- Debloat tối ưu hiệu năng
+## 🚀 Hướng dẫn sử dụng
 
-## Credits
+1. **Tải file**: Chọn bản `SamsungBrowser-X.X.X.X.zip` mới nhất.
+2. **Giải nén**: Giải nén file ZIP vào một thư mục bất kỳ (ví dụ: `D:\Browsers\`).
+3. **Sử dụng**: 
+   - Vào thư mục `Samsung_Browser`.
+   - Chạy **`samsunginternet.exe`** để bắt đầu lướt web.
 
-- [chromium-hibbiki-portable](https://github.com/bibicadotnet/chromium-hibbiki-portable)
-- [samsung_browser-offline-installer](https://github.com/hoangxg4/samsung_browser-offline-installer)
+> [!TIP]
+> **Để đặt làm trình duyệt mặc định:** Chạy file `default-apps-multi-profile.bat` bằng quyền **Admin** và làm theo hướng dẫn trên màn hình.
+
+---
+
+## 📂 Danh sách các file quan trọng
+
+| File | Chức năng |
+| :--- | :--- |
+| `Samsung_Browser/` | Thư mục chứa lõi trình duyệt và các file thực thi. |
+| `default-apps-multi-profile.bat` | Đăng ký trình duyệt với Windows (Default Browser). |
+| `update.bat` | Tự động kiểm tra và cập nhật lên phiên bản mới nhất từ GitHub. |
+| `chrome++.ini` | Cấu hình chuyên sâu cho nhân Chrome++. |
+| `debloater.reg` | File Registry tối ưu chính sách bảo mật và hiệu năng (Tùy chọn). |
+| `Data/` | Nơi lưu trữ toàn bộ dữ liệu cá nhân của bạn. |
+
+---
+
+## 🔄 Cập nhật
+
+Để cập nhật phiên bản mới mà không mất dữ liệu:
+1. Chạy file **`update.bat`** bên trong thư mục trình duyệt.
+2. Script sẽ tự động tải bản mới nhất, ghi đè lõi trình duyệt nhưng **giữ lại** thư mục `Data` (Bookmark/Pass) và các file cấu hình cá nhân của bạn.
+
+---
+
+## 🤝 Credits
+
+Dự án này được phát triển dựa trên nỗ lực của cộng đồng:
+- **[chromium-hibbiki-portable](https://github.com/bibicadotnet/chromium-hibbiki-portable)** - Nguồn cảm hứng và cấu trúc Portable.
+- **[hoangxg4/samsung_browser-offline-installer](https://github.com/hoangxg4/samsung_browser-offline-installer)** - Bộ cài Offline chính thức.
+- **[GreenZero](https://github.com/Bush2021/chrome_plus)** - Tác giả của Chrome++.
+
+---
+*Phát triển và bảo trì bởi **CezDev Bot** & **hoangxg4***.
