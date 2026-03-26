@@ -27,9 +27,12 @@ jobs:
             $newVersion = "143.0.0.95"
           }
           
-          echo "VERSION=$newVersion" >> $env:GITHUB_ENV
-          echo "DOWNLOAD_URL=$($asset.browser_download_url)" >> $env:GITHUB_ENV
-          echo "FILENAME=$filename" >> $env:GITHUB_ENV
+          Write-Host "New version: $newVersion"
+          Write-Host "Download URL: $($asset.browser_download_url)"
+          
+          echo "VERSION=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          echo "DOWNLOAD_URL=$($asset.browser_download_url)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          echo "FILENAME=$filename" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
         } else {
           Write-Host "Không tìm thấy asset"
           exit 1
@@ -41,15 +44,16 @@ jobs:
           $currentVersion = Get-Content "version.txt" -Raw -ErrorAction SilentlyContinue
           $currentVersion = $currentVersion.Trim()
         }
-        echo "CURRENT_VERSION=$currentVersion" >> $env:GITHUB_ENV
+        Write-Host "Current version: $currentVersion"
+        echo "CURRENT_VERSION=$currentVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
 
         # Kiểm tra release đã tồn tại chưa
         $tag = "v$newVersion"
         try {
           Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{Authorization="Bearer $env:GITHUB_TOKEN"} -ErrorAction Stop
-          echo "EXISTS=true" >> $env:GITHUB_ENV
+          echo "EXISTS=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
         } catch {
-          echo "EXISTS=false" >> $env:GITHUB_ENV
+          echo "EXISTS=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
         }
 
     - uses: actions/checkout@v4
@@ -65,7 +69,9 @@ jobs:
       if: env.EXISTS == 'false'
       shell: pwsh
       run: |
-        Write-Host "Đang tải ${{ env.FILENAME }}..."
+        $version = "${{ env.VERSION }}"
+        $filename = "${{ env.FILENAME }}"
+        Write-Host "Đang tải $filename..."
         curl -sSL "${{ env.DOWNLOAD_URL }}" -o samsung_offline.zip
         Write-Host "Tải hoàn tất!"
 
@@ -73,6 +79,8 @@ jobs:
       if: env.EXISTS == 'false'
       shell: pwsh
       run: |
+        $version = "${{ env.VERSION }}"
+        
         # Giải nén file zip đầu tiên (chứa mini_installer.exe)
         Write-Host "Đang giải nén..."
         Expand-Archive -Path samsung_offline.zip -DestinationPath temp_installer -Force
@@ -93,7 +101,6 @@ jobs:
         # Tìm samsunginternet.7z
         $sevenZip = Get-ChildItem -Path temp_extract -Filter "samsunginternet.7z" -Recurse | Select-Object -First 1
         if (-not $sevenZip) {
-          # Thử tìm trong thư mục khác
           $sevenZip = Get-ChildItem -Path temp_installer -Filter "*.7z" -Recurse | Select-Object -First 1
         }
 
@@ -138,12 +145,13 @@ jobs:
         New-Item -Force -Type Directory SamsungBrowser-Portable/Cache | Out-Null
 
         # Lưu phiên bản
-        ${{ env.VERSION }} | Out-File -FilePath version.txt -Encoding UTF8
+        Set-Content -Path version.txt -Value $version -Encoding utf8
 
         # Nén thành zip
         Write-Host "Đang nén file..."
-        Compress-Archive -Path SamsungBrowser-Portable "SamsungBrowser-Portable-v${{ env.VERSION }}.zip" -Force
-        Write-Host "Nén hoàn tất!"
+        $zipName = "SamsungBrowser-Portable-v$version.zip"
+        Compress-Archive -Path SamsungBrowser-Portable $zipName -Force
+        Write-Host "Nén hoàn tất: $zipName"
 
         # Cleanup
         Remove-Item samsung_offline.zip -Force -ErrorAction SilentlyContinue
@@ -153,7 +161,7 @@ jobs:
     - name: Release
       if: env.EXISTS == 'false'
       uses: softprops/action-gh-release@v2
-      with:
+      with: |
         files: SamsungBrowser-Portable-v${{ env.VERSION }}.zip
         tag_name: v${{ env.VERSION }}
         name: Samsung Browser Portable v${{ env.VERSION }}
