@@ -10,50 +10,30 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - name: Check versions and release
+    - name: Check versions
       id: check
       shell: pwsh
       run: |
-        # Lấy phiên bản mới nhất từ Samsung server
-        $body = @{
-          request = @{
-            "@os" = "win"
-            "@updater" = "updater"
-            acceptformat = "crx3,download,puff,run,xz,zucc"
-            apps = @(@{
-              appid = "ohpjbciplfdockeiligelcjnkiejldpn"
-              enabled = $true
-              installdate = -1
-              installsource = "taggedmi"
-              updatecheck = @{sameversionupdate = $true}
-              version = "0.0.0.0"
-            })
-            arch = "x64"
-            dedup = "cr"
-            domainjoined = $false
-            hw = @{avx = $true; physmemory = 16; sse = $true; sse2 = $true; sse3 = $true; sse41 = $true; sse42 = $true; ssse3 = $true}
-            ismachine = $true
-            os = @{arch = "x86_64"; platform = "Windows"; version = "10.0.26200.8037"}
-            prodversion = "143.0.7499.194"
-            protocol = "4.0"
-            requestid = "{" + [guid]::NewGuid().ToString() + "}"
-            sessionid = "{" + [guid]::NewGuid().ToString() + "}"
-            updaterversion = "143.0.7499.194"
+        # Lấy phiên bản mới nhất từ samsung_browser-offline-installer
+        $release = Invoke-RestMethod "https://api.github.com/repos/hoangxg4/samsung_browser-offline-installer/releases/latest"
+        $asset = $release.assets | Where-Object { $_.name -match "SamsungInternet_Offline" } | Select-Object -First 1
+        
+        if ($asset) {
+          # Trích xuất phiên bản từ tên file
+          $filename = $asset.name
+          if ($filename -match "v?([\d\.]+)") {
+            $newVersion = $matches[1]
+          } else {
+            $newVersion = "143.0.0.95"
           }
-        } | ConvertTo-Json -Depth 10
-
-        $headers = @{
-          "Content-Type" = "application/json"
-          "User-Agent" = "SamsungInternetUpdater 143.0.0.8"
-          "X-Goog-Update-AppId" = "ohpjbciplfdockeiligelcjnkiejldpn"
+          
+          echo "VERSION=$newVersion" >> $env:GITHUB_ENV
+          echo "DOWNLOAD_URL=$($asset.browser_download_url)" >> $env:GITHUB_ENV
+          echo "FILENAME=$filename" >> $env:GITHUB_ENV
+        } else {
+          Write-Host "Không tìm thấy asset"
+          exit 1
         }
-
-        $response = Invoke-RestMethod -Uri "https://update.internet.apps.samsung.com/service/update2/json" -Method Post -Body $body -Headers $headers -UseBasicParsing
-        $newVersion = $response.response.apps[0].updatecheck.nextversion
-        $downloadUrl = $response.response.apps[0].updatecheck.pipelines[0].operations[0].urls[0].url
-
-        echo "VERSION=$newVersion" >> $env:GITHUB_ENV
-        echo "DOWNLOAD_URL=$downloadUrl" >> $env:GITHUB_ENV
 
         # Kiểm tra phiên bản hiện tại
         $currentVersion = ""
@@ -61,7 +41,6 @@ jobs:
           $currentVersion = Get-Content "version.txt" -Raw -ErrorAction SilentlyContinue
           $currentVersion = $currentVersion.Trim()
         }
-
         echo "CURRENT_VERSION=$currentVersion" >> $env:GITHUB_ENV
 
         # Kiểm tra release đã tồn tại chưa
@@ -86,7 +65,7 @@ jobs:
       if: env.EXISTS == 'false'
       shell: pwsh
       run: |
-        Write-Host "Đang tải Samsung Browser v${{ env.VERSION }}..."
+        Write-Host "Đang tải ${{ env.FILENAME }}..."
         curl -sSL "${{ env.DOWNLOAD_URL }}" -o samsung_offline.zip
         Write-Host "Tải hoàn tất!"
 
@@ -94,7 +73,7 @@ jobs:
       if: env.EXISTS == 'false'
       shell: pwsh
       run: |
-        # Giải nén file zip đầu tiên
+        # Giải nén file zip đầu tiên (chứa mini_installer.exe)
         Write-Host "Đang giải nén..."
         Expand-Archive -Path samsung_offline.zip -DestinationPath temp_installer -Force
 
@@ -106,8 +85,9 @@ jobs:
         }
         Write-Host "Tìm thấy: $($miniInstaller.Name)"
 
-        # Giải nén mini_installer
+        # Giải nén mini_installer để lấy samsunginternet.7z
         Write-Host "Đang giải nén mini_installer..."
+        New-Item -Force -Type Directory temp_extract | Out-Null
         & .\7zr.exe x $miniInstaller.FullName "-otemp_extract" -y | Out-Null
 
         # Tìm samsunginternet.7z
@@ -149,7 +129,9 @@ jobs:
         Copy-Item index.html SamsungBrowser-Portable/ -Force
 
         # Copy WidevineCdm
-        Copy-Item WidevineCdm SamsungBrowser-Portable/ -Recurse -Force
+        if (Test-Path WidevineCdm) {
+          Copy-Item WidevineCdm SamsungBrowser-Portable/ -Recurse -Force
+        }
 
         # Tạo thư mục Data và Cache
         New-Item -Force -Type Directory SamsungBrowser-Portable/Data | Out-Null
