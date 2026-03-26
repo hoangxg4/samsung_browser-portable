@@ -10,16 +10,19 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - name: Get latest version
-      id: version
+    - uses: actions/checkout@v4
+
+    - name: Download 7zr
+      run: curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
+
+    - name: Build and Release
       shell: pwsh
       run: |
+        # Lấy phiên bản mới nhất từ samsung_browser-offline-installer
         $release = Invoke-RestMethod "https://api.github.com/repos/hoangxg4/samsung_browser-offline-installer/releases/latest"
         $asset = $release.assets | Where-Object { $_.name -match "SamsungInternet_Offline" } | Select-Object -First 1
         
         $newVersion = "143.0.0.95"
-        $downloadUrl = ""
-        
         if ($asset) {
           $filename = $asset.name
           if ($filename -match "v?([\d\.]+)") {
@@ -28,78 +31,47 @@ jobs:
           $downloadUrl = $asset.browser_download_url
         }
         
-        Write-Host "New version: $newVersion"
+        Write-Host "Target version: $newVersion"
         Write-Host "Download URL: $downloadUrl"
-        Write-Host "##vso[task.setvariable variable=version;isOutput=true]$newVersion"
-        Write-Host "##vso[task.setvariable variable=downloadUrl;isOutput=true]$downloadUrl"
-
-    - name: Check current version
-      id: current
-      shell: pwsh
-      run: |
+        
+        # Kiểm tra phiên bản hiện tại
         $currentVersion = ""
         if (Test-Path "version.txt") {
           $currentVersion = Get-Content "version.txt" -Raw -ErrorAction SilentlyContinue
           $currentVersion = $currentVersion.Trim()
         }
+        Write-Host "Current version: '$currentVersion'"
         
-        $newVersion = "${{ steps.version.outputs.version }}"
-        
-        Write-Host "Current: '$currentVersion'"
-        Write-Host "New: '$newVersion'"
-        
-        $shouldBuild = "true"
-        if ($currentVersion -ne "" -and $currentVersion -eq $newVersion) {
-          $shouldBuild = "false"
+        # Kiểm tra release đã tồn tại chưa
+        $tag = "v$newVersion"
+        try {
+          $existingRelease = Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"} -ErrorAction Stop
+          Write-Host "Release already exists, skipping..."
+          exit 0
+        } catch {
+          Write-Host "Release does not exist, building..."
         }
         
-        Write-Host "Should build: $shouldBuild"
-        Write-Host "##vso[task.setvariable variable=shouldBuild;isOutput=true]$shouldBuild"
-
-    - name: Checkout
-      if: steps.current.outputs.shouldBuild == 'true'
-      uses: actions/checkout@v4
-
-    - name: Download 7zr
-      if: steps.current.outputs.shouldBuild == 'true'
-      run: curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
-
-    - name: Download Samsung Browser
-      if: steps.current.outputs.shouldBuild == 'true'
-      run: curl -sSL "${{ steps.version.outputs.downloadUrl }}" -o samsung.zip
-
-    - name: Extract and Build
-      if: steps.current.outputs.shouldBuild == 'true'
-      shell: pwsh
-      run: |
-        $version = "${{ steps.version.outputs.version }}"
+        # Download
+        Write-Host "Downloading..."
+        Invoke-WebRequest -Uri $downloadUrl -OutFile samsung.zip -UserAgent "SamsungBrowser"
         
         # Giải nén samsung.zip
-        Write-Host "Extracting samsung.zip..."
+        Write-Host "Extracting..."
         Expand-Archive -Path samsung.zip -DestinationPath temp -Force
         
         # Tìm mini_installer.exe
         $mini = Get-ChildItem -Path temp -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
-        if (-not $mini) { 
-          Write-Host "ERROR: mini_installer.exe not found"
-          exit 1 
-        }
         Write-Host "Found: $($mini.Name)"
         
         # Giải nén mini_installer
-        Write-Host "Extracting mini_installer..."
         & .\7zr.exe x $mini.FullName "-otemp2" -y | Out-Null
         
         # Tìm samsunginternet.7z
         $seven = Get-ChildItem -Path temp2 -Filter "*.7z" -Recurse | Select-Object -First 1
-        if (-not $seven) { 
-          Write-Host "ERROR: samsunginternet.7z not found"
-          exit 1 
-        }
         Write-Host "Found: $($seven.Name)"
         
         # Giải nén samsunginternet.7z -> Chrome-bin
-        Write-Host "Extracting Chrome-bin..."
         & .\7zr.exe x $seven.FullName "-oChrome-bin" -y | Out-Null
         
         # Tạo thư mục SamsungBrowser
@@ -116,25 +88,23 @@ jobs:
         New-Item -Force -Type Directory SamsungBrowser/Cache | Out-Null
         
         # Lưu version
-        Set-Content -Path version.txt -Value $version -Encoding utf8
+        Set-Content -Path version.txt -Value $newVersion -Encoding utf8
         
         # Nén
-        $zipName = "SamsungBrowser-$version.zip"
-        Write-Host "Creating $zipName..."
+        $zipName = "SamsungBrowser-$newVersion.zip"
         Compress-Archive -Path SamsungBrowser $zipName -Force
+        Write-Host "Created: $zipName"
         
         # Cleanup
         Remove-Item samsung.zip,temp,temp2 -Recurse -Force -ErrorAction SilentlyContinue
         
-        Write-Host "Done!"
-
+        # Release
+        Write-Host "Creating release..."
+        
     - name: Release
-      if: steps.current.outputs.shouldBuild == 'true'
       uses: softprops/action-gh-release@v2
       with:
-        files: SamsungBrowser-${{ steps.version.outputs.version }}.zip
-        tag_name: v${{ steps.version.outputs.version }}
-        name: Samsung Browser v${{ steps.version.outputs.version }}
+        files: SamsungBrowser-*.zip
         body: |
           📥 **Tải về, giải nén và dùng ngay!**
           
