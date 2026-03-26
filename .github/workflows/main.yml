@@ -11,95 +11,74 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Download 7zr
       run: curl -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
 
-    - name: Build and Release
+    - name: Build
       id: build
       shell: pwsh
       run: |
-        # Lấy phiên bản mới nhất từ samsung_browser-offline-installer
+        # Lấy phiên bản mới nhất
         $release = Invoke-RestMethod "https://api.github.com/repos/hoangxg4/samsung_browser-offline-installer/releases/latest"
         $asset = $release.assets | Where-Object { $_.name -match "SamsungInternet_Offline" } | Select-Object -First 1
         
         $newVersion = "143.0.0.95"
         if ($asset) {
-          $filename = $asset.name
-          if ($filename -match "v?([\d\.]+)") {
+          if ($asset.name -match "v?([\d\.]+)") {
             $newVersion = $matches[1]
           }
           $downloadUrl = $asset.browser_download_url
         }
         
-        $tagName = "v$newVersion"
-        Write-Host "##vso[task.setvariable variable=tag;]$tagName"
-        Write-Host "Target version: $newVersion"
-        Write-Host "Tag: $tagName"
+        Write-Host "Version: $newVersion"
         
-        # Kiểm tra release đã tồn tại chưa
-        try {
-          $existingRelease = Invoke-RestMethod "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tagName" -Headers @{Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"} -ErrorAction Stop
-          Write-Host "Release already exists, skipping..."
-          exit 0
-        } catch {
-          Write-Host "Release does not exist, building..."
-        }
+        # Lưu version
+        Set-Content -Path version.txt -Value $newVersion -Encoding utf8
         
         # Download
         Write-Host "Downloading..."
         Invoke-WebRequest -Uri $downloadUrl -OutFile samsung.zip -UserAgent "SamsungBrowser"
         
-        # Giải nén samsung.zip
+        # Giải nén
         Write-Host "Extracting..."
         Expand-Archive -Path samsung.zip -DestinationPath temp -Force
         
-        # Tìm mini_installer.exe
         $mini = Get-ChildItem -Path temp -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
-        Write-Host "Found: $($mini.Name)"
-        
-        # Giải nén mini_installer
         & .\7zr.exe x $mini.FullName "-otemp2" -y | Out-Null
         
-        # Tìm samsunginternet.7z
         $seven = Get-ChildItem -Path temp2 -Filter "*.7z" -Recurse | Select-Object -First 1
-        Write-Host "Found: $($seven.Name)"
-        
-        # Giải nén samsunginternet.7z -> Chrome-bin
         & .\7zr.exe x $seven.FullName "-oChrome-bin" -y | Out-Null
         
-        # Tạo thư mục SamsungBrowser
+        # Tạo SamsungBrowser
         New-Item -Force -Type Directory SamsungBrowser | Out-Null
         Move-Item -Path Chrome-bin SamsungBrowser/ -Force
         
-        # Copy các file cần thiết
-        Copy-Item chrome++.ini SamsungBrowser/ -Force
-        Copy-Item debloater.reg SamsungBrowser/ -Force
-        Copy-Item update.bat SamsungBrowser/ -Force
-        
-        # Tạo thư mục Data/Cache
-        New-Item -Force -Type Directory SamsungBrowser/Data | Out-Null
-        New-Item -Force -Type Directory SamsungBrowser/Cache | Out-Null
-        
-        # Lưu version
-        Set-Content -Path version.txt -Value $newVersion -Encoding utf8
+        Copy-Item chrome++.ini,debloater.reg,update.bat SamsungBrowser/ -Force
+        New-Item -Force -Type Directory SamsungBrowser/Data,SamsungBrowser/Cache | Out-Null
         
         # Nén
         $zipName = "SamsungBrowser-$newVersion.zip"
         Compress-Archive -Path SamsungBrowser $zipName -Force
-        Write-Host "Created: $zipName"
         
         # Cleanup
         Remove-Item samsung.zip,temp,temp2 -Recurse -Force -ErrorAction SilentlyContinue
         
-        Write-Host "Done!"
+        # Commit version
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git config user.name "github-actions[bot]"
+        git add version.txt
+        git commit -m "Release v$newVersion"
+        git push
+        
+        Write-Host "Build complete!"
 
     - name: Release
       uses: softprops/action-gh-release@v2
       with:
         files: SamsungBrowser-*.zip
-        tag_name: ${{ steps.build.outputs.tag }}
-        name: Samsung Browser ${{ steps.build.outputs.tag }}
         body: |
           📥 **Tải về, giải nén và dùng ngay!**
           
