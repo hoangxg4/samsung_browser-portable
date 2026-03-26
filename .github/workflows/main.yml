@@ -61,42 +61,51 @@ jobs:
         Write-Host "Downloading..."
         Invoke-WebRequest -Uri $downloadUrl -OutFile samsung.zip -UserAgent "SamsungBrowser"
         
-        # 4. Giải nén
+        # 4. Giải nén và Xử lý cấu trúc
         Write-Host "Extracting..."
         Expand-Archive -Path samsung.zip -DestinationPath temp -Force
         
-        # Tìm mini_installer
+        # Tìm và xả mini_installer
         $mini = Get-ChildItem -Path temp -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
         & .\7zr.exe x $mini.FullName "-otemp2" -y | Out-Null
         
-        # Tìm samsunginternet.7z
+        # Tìm và xả samsunginternet.7z
         $seven = Get-ChildItem -Path temp2 -Filter "*.7z" -Recurse | Select-Object -First 1
-        
-        # Giải nén vào thư mục tạm
         & .\7zr.exe x $seven.FullName "-otemp_chrome" -y | Out-Null
         
-        # Tìm thư mục chứa browser (Chrome-bin hoặc similar)
-        $chromeDir = Get-ChildItem -Path temp_chrome -Directory | Select-Object -First 1
-        Write-Host "Chrome dir: $($chromeDir.Name)"
+        # Tìm thư mục browser gốc (thường là Chrome-bin bên trong file nén)
+        $sourceDir = Get-ChildItem -Path temp_chrome -Directory -Recurse | Where-Object { $_.Name -eq "Chrome-bin" } | Select-Object -First 1
+        if (-not $sourceDir) {
+            $sourceDir = Get-ChildItem -Path temp_chrome -Directory | Select-Object -First 1
+        }
+
+        # Tạo thư mục gốc của bộ Portable
+        $portableRoot = "SamsungBrowser_Portable"
+        New-Item -Force -Type Directory $portableRoot | Out-Null
         
-        # Tạo SamsungBrowser và di chuyển đúng cấu trúc
-        New-Item -Force -Type Directory SamsungBrowser | Out-Null
-        Move-Item -Path $chromeDir.FullName SamsungBrowser/Chrome-bin -Force
+        # Di chuyển và đổi tên thư mục browser thành Samsung_Browser
+        $browserDir = Join-Path $portableRoot "Samsung_Browser"
+        Move-Item -Path $sourceDir.FullName -Destination $browserDir -Force
         
-        # Copy các file config
-        @("chrome++.ini", "debloater.reg", "update.bat") | ForEach-Object {
-            if (Test-Path $_) { Copy-Item $_ SamsungBrowser/ -Force }
+        # 5. Copy các file config VÀO TRONG thư mục Samsung_Browser
+        # Bao gồm chrome++.ini, version.dll (nếu có), v.v.
+        @("chrome++.ini", "version.dll", "chrome++.dll", "debloater.reg", "update.bat") | ForEach-Object {
+            if (Test-Path $_) { 
+                Write-Host "Copying $_ to Samsung_Browser..."
+                Copy-Item $_ $browserDir -Force 
+            }
         }
         
-        # Tạo Data và Cache
-        New-Item -Force -Type Directory SamsungBrowser/Data, SamsungBrowser/Cache | Out-Null
+        # Tạo Data và Cache bên trong thư mục browser để đảm bảo tính Portable (tùy chọn)
+        New-Item -Force -Type Directory (Join-Path $browserDir "Data") | Out-Null
+        New-Item -Force -Type Directory (Join-Path $browserDir "Cache") | Out-Null
         
-        # 5. Nén - chỉ nén nội dung trong SamsungBrowser
+        # 6. Nén - Nén thư mục SamsungBrowser_Portable
         Write-Host "Compressing..."
-        Compress-Archive -Path "SamsungBrowser/*" -DestinationPath $zipName -Force
+        Compress-Archive -Path "$portableRoot/*" -DestinationPath $zipName -Force
 
-        # 6. Cleanup
-        Remove-Item 7zr.exe, samsung.zip, temp, temp2, temp_chrome, SamsungBrowser -Recurse -Force -ErrorAction SilentlyContinue
+        # 7. Cleanup
+        Remove-Item 7zr.exe, samsung.zip, temp, temp2, temp_chrome, $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
 
         # Output
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
@@ -125,10 +134,14 @@ jobs:
         body: |
           📥 **Samsung Browser Portable v${{ steps.build_step.outputs.version }}**
           
+          ### Cấu trúc file:
+          - Đã đổi tên thư mục browser thành `Samsung_Browser`.
+          - Đã tích hợp `chrome++.ini` và các file bổ trợ trực tiếp vào thư mục browser.
+          
           ### Hướng dẫn:
           1. Tải file ZIP bên dưới.
-          2. Giải nén vào thư mục bất kỳ.
-          3. Chạy `samsunginternet.exe` trong thư mục `Chrome-bin`.
+          2. Giải nén.
+          3. Vào thư mục `Samsung_Browser` và chạy `samsunginternet.exe`.
           
           ---
-          *Tự động đóng gói*
+          *Tự động đóng gói bởi CezDev Bot*
