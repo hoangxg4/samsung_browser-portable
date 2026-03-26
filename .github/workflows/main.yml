@@ -24,95 +24,119 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         EVENT_NAME: ${{ github.event_name }}
       run: |
-        # 1. Lấy thông tin phiên bản
+        # 1. Đọc phiên bản hiện tại từ Repo
+        $currentLocalVersion = "0.0.0.0"
+        if (Test-Path "version.txt") {
+            $currentLocalVersion = (Get-Content "version.txt").Trim()
+        }
+        Write-Host "Phien ban hien tai trong Repo: $currentLocalVersion"
+
+        # 2. Lấy thông tin phiên bản mới nhất từ Repo gốc
         $release = Invoke-RestMethod "https://api.github.com/repos/hoangxg4/samsung_browser-offline-installer/releases/latest"
         $asset = $release.assets | Where-Object { $_.name -match "SamsungInternet_Offline" } | Select-Object -First 1
         
-        $newVersion = "143.0.0.95"
-        if ($asset) {
-            if ($asset.name -match "v?(\d[\d\.]+\d)") { $newVersion = $matches[1] }
-            $downloadUrl = $asset.browser_download_url
+        if (-not $asset) { 
+            Write-Error "Khong tim thay ban thiet lap offline tren Repo goc."
+            exit 1 
         }
+
+        $newVersion = ""
+        if ($asset.name -match "v?(\d[\d\.]+\d)") { $newVersion = $matches[1] }
         $newVersion = $newVersion.Trim().Trim('.')
+        $downloadUrl = $asset.browser_download_url
         $tag = "v$newVersion"
         $zipName = "SamsungBrowser-$newVersion.zip"
 
-        # 2. Xử lý Release cũ (nếu chạy thủ công)
-        if ($env:EVENT_NAME -ne "schedule") {
-            gh release delete $tag --yes 2>$null
-            git push origin :refs/tags/$tag 2>$null
-        } elseif (gh release view $tag 2>$null) {
-            Write-Host "Release $tag already exists. Skipping."
+        Write-Host "Phien ban moi nhat online: $newVersion"
+
+        # 3. Kiem tra xem co can Build khong
+        if ($newVersion -eq $currentLocalVersion -and $env:EVENT_NAME -eq "schedule") {
+            Write-Host "Khong co ban moi. Dang bo qua..."
             echo "skip=true" >> $env:GITHUB_OUTPUT
             exit 0
         }
 
-        # 3. Tải và giải nén trình duyệt
+        # Neu chay thu cong, xoa Release cu de ghi de
+        if ($env:EVENT_NAME -ne "schedule") {
+            gh release delete $tag --yes 2>$null
+            git push origin :refs/tags/$tag 2>$null
+        }
+
+        # 4. Tai file va cong cu
         curl.exe -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
+        Write-Host "Dang tai bo cai Samsung..."
         Invoke-WebRequest -Uri $downloadUrl -OutFile samsung.zip -UserAgent "SamsungBrowser"
         
-        New-Item -ItemType Directory -Force -Path "temp_raw" | Out-Null
-        Expand-Archive -Path samsung.zip -DestinationPath "temp_raw\l1" -Force
-        $mini = Get-ChildItem -Path "temp_raw\l1" -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
-        & .\7zr.exe x $mini.FullName "-otemp_raw\l2" -y | Out-Null
-        $sevenZ = Get-ChildItem -Path "temp_raw\l2" -Filter "*.7z" -Recurse | Select-Object -First 1
-        & .\7zr.exe x $sevenZ.FullName "-otemp_raw\extracted" -y | Out-Null
+        # 5. Giai nen da tang
+        Write-Host "Dang giai nen..."
+        New-Item -ItemType Directory -Force -Path "temp_work" | Out-Null
+        Expand-Archive -Path samsung.zip -DestinationPath "temp_work\l1" -Force
+        $mini = Get-ChildItem -Path "temp_work\l1" -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
+        & .\7zr.exe x $mini.FullName "-otemp_work\l2" -y | Out-Null
+        $sevenZ = Get-ChildItem -Path "temp_work\l2" -Filter "*.7z" -Recurse | Select-Object -First 1
+        & .\7zr.exe x $sevenZ.FullName "-otemp_work\extracted" -y | Out-Null
         
-        $sourceChromeBin = Get-ChildItem -Path "temp_raw\extracted" -Directory -Recurse | Where-Object { $_.Name -eq "Chrome-bin" } | Select-Object -First 1
-
-        # 4. Thiết lập cấu trúc Samsung_Browser
+        # Tim thu muc Chrome-bin thuc te
+        $sourceDir = Get-ChildItem -Path "temp_work\extracted" -Directory -Recurse | Where-Object { $_.Name -eq "Chrome-bin" } | Select-Object -First 1
+        
+        # 6. Thiet lap cau truc Portable
         $portableRoot = "SamsungBrowser_Portable"
         $browserDir = Join-Path $portableRoot "Samsung_Browser"
         New-Item -Force -Type Directory $browserDir | Out-Null
         
-        # Di chuyển ruột của Chrome-bin vào Samsung_Browser
-        Move-Item -Path "$($sourceChromeBin.FullName)\*" -Destination $browserDir -Force
-
-        # 5. XỬ LÝ MÃ HÓA FILE (FIX LỖI FONT)
-        # Danh sách các file text cần fix encoding
-        $textFiles = @("default-apps-multi-profile.bat", "update.bat", "chrome++.ini", "debloater.reg")
+        # Di chuyen loi trinh duyet
+        Move-Item -Path "$($sourceDir.FullName)\*" -Destination $browserDir -Force
         
-        foreach ($file in $textFiles) {
+        # 7. XU LY ENCODING VA COPY FILE CONFIG (Fix loi font)
+        # Liet ke cac file can fix encoding tu Repo cua ban
+        $configFiles = @("default-apps-multi-profile.bat", "update.bat", "chrome++.ini", "debloater.reg")
+        
+        foreach ($file in $configFiles) {
             if (Test-Path $file) {
-                Write-Host "Fixing encoding for $file..."
+                Write-Host "Dang fix encoding cho $file..."
                 $content = Get-Content -Path $file -Raw
+                $destPath = Join-Path $browserDir $file
                 
-                # File .bat và .reg nên dùng ASCII hoặc UTF8 (No BOM) để CMD đọc chuẩn
+                # .bat va .reg dung ASCII de CMD doc chuan, .ini dung UTF8
                 if ($file.EndsWith(".bat") -or $file.EndsWith(".reg")) {
-                    $content | Out-File -FilePath (Join-Path $browserDir $file) -Encoding ascii -Force
+                    $content | Out-File -FilePath $destPath -Encoding ascii -Force
                 } else {
-                    $content | Out-File -FilePath (Join-Path $browserDir $file) -Encoding utf8 -Force
+                    $content | Out-File -FilePath $destPath -Encoding utf8 -Force
                 }
             }
         }
 
-        # Copy các file nhị phân (như .dll) nếu có
+        # Copy file nhi phan neu co
         if (Test-Path "version.dll") { Copy-Item "version.dll" $browserDir -Force }
+        
+        # Tao thu muc du lieu nguoi dung
+        New-Item -Force -Type Directory (Join-Path $browserDir "Data") | Out-Null
+        New-Item -Force -Type Directory (Join-Path $browserDir "Cache") | Out-Null
 
-        # Tạo sẵn Data/Cache rỗng
-        New-Item -Force -Type Directory (Join-Path $browserDir "Data"), (Join-Path $browserDir "Cache") | Out-Null
-
-        # 6. Đóng gói và Cleanup
+        # 8. Dong goi ZIP
+        Write-Host "Dang nen file ZIP..."
         Compress-Archive -Path "$portableRoot/*" -DestinationPath $zipName -Force
-        Remove-Item 7zr.exe, samsung.zip, temp_raw, $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
 
-        # Output variables
+        # 9. Don dep rác
+        Remove-Item 7zr.exe, samsung.zip, temp_work, $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+        # Gui du lieu sang cac buoc sau
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
         echo "version=$newVersion" >> $env:GITHUB_OUTPUT
         echo "zip_path=$zipName" >> $env:GITHUB_OUTPUT
         echo "skip=false" >> $env:GITHUB_OUTPUT
 
-    - name: Push version update
+    - name: Update Version File
       if: steps.build_step.outputs.skip != 'true'
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         echo "${{ steps.build_step.outputs.version }}" > version.txt
         git add version.txt
-        git commit -m "Update to ${{ steps.build_step.outputs.tag }} [skip ci]" --allow-empty
+        git commit -m "Build version ${{ steps.build_step.outputs.version }} [skip ci]" --allow-empty
         git push origin main
 
-    - name: Create Release
+    - name: Create GitHub Release
       if: steps.build_step.outputs.skip != 'true'
       uses: softprops/action-gh-release@v2
       with:
@@ -120,3 +144,18 @@ jobs:
         name: Samsung Browser ${{ steps.build_step.outputs.version }}
         files: ${{ steps.build_step.outputs.zip_path }}
         token: ${{ secrets.GITHUB_TOKEN }}
+        body: |
+          📥 **Samsung Browser Portable v${{ steps.build_step.outputs.version }}**
+          
+          ### Hướng dẫn:
+          1. Tải file ZIP bên dưới và giải nén.
+          2. Vào thư mục `Samsung_Browser`.
+          3. Chạy `samsunginternet.exe` để sử dụng.
+          
+          ### Công cụ đi kèm:
+          - `default-apps-multi-profile.bat`: Đặt làm trình duyệt mặc định (Chạy Admin).
+          - `update.bat`: Cập nhật phiên bản mới tự động.
+          - `debloater.reg`: Tối ưu hóa quyền riêng tư và hiệu năng.
+          
+          ---
+          *Build tự động bởi CezDev Bot*
