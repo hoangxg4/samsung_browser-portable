@@ -14,6 +14,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Update Logic
       id: update_step
@@ -22,73 +24,60 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         EVENT_NAME: ${{ github.event_name }}
       run: |
-        # 1. Lấy thông tin release mới nhất (Dùng API chính thức)
+        # 1. Lấy thông tin release
         $apiUrl = "https://api.github.com/repos/macchrome/winchrome/releases"
-        try {
-            $releases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "Authorization" = "token $env:GITHUB_TOKEN" }
-            # Lọc bản release không phải prerelease và có asset ungoogled-chromium win64
-            $latestRelease = $releases | Where-Object { $_.prerelease -eq $false } | Select-Object -First 1
-            $asset = $latestRelease.assets | Where-Object { $_.name -match "ungoogled-chromium-.*_Win64\.7z$" } | Select-Object -First 1
-            $downloadUrl = $asset.browser_download_url
-            $fileName = $asset.name
-        } catch {
-            Write-Error "Failed to fetch data from GitHub API. Check rate limits or repo permissions."
-            exit 1
-        }
+        $releases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "Authorization" = "token $env:GITHUB_TOKEN" }
+        $latestRelease = $releases | Where-Object { $_.prerelease -eq $false } | Select-Object -First 1
+        $asset = $latestRelease.assets | Where-Object { $_.name -match "ungoogled-chromium-.*_Win64\.7z$" } | Select-Object -First 1
+        $downloadUrl = $asset.browser_download_url
+        $fileName = $asset.name
 
-        if (-not $downloadUrl) {
-            Write-Error "Could not find a matching Win64 .7z asset."
-            exit 1
-        }
-
-        # 2. Tải công cụ giải nén
+        # 2. Tải 7zr
         curl.exe -L https://www.7-zip.org/a/7zr.exe -o 7zr.exe
 
-        # 3. Tải và giải nén
+        # 3. Tải và giải nén vào thư mục tạm
         New-Item -ItemType Directory -Force -Path "temp_widevine" | Out-Null
-        Write-Host "Downloading: $fileName"
         Invoke-WebRequest -Uri $downloadUrl -OutFile "temp_widevine\$fileName"
-
-        Write-Host "Extracting package..."
         & .\7zr.exe x "temp_widevine\$fileName" "-otemp_widevine\extracted" -y | Out-Null
 
-        # 4. Tìm thư mục WidevineCdm bên trong đống vừa giải nén
+        # 4. Tìm và xác định version
         $newWidevinePath = Get-ChildItem -Path "temp_widevine\extracted" -Filter "WidevineCdm" -Recurse -Directory | Select-Object -First 1
-        if (-not $newWidevinePath) {
-            Write-Error "WidevineCdm directory not found in the package."
-            exit 1
-        }
-
-        # 5. Kiểm tra phiên bản
-        $newManifest = Get-Content -Path (Join-Path $newWidevinePath.FullName "manifest.json") | ConvertFrom-Json
-        $newVersion = $newManifest.version
-
+        $newVersion = (Get-Content -Path (Join-Path $newWidevinePath.FullName "manifest.json") | ConvertFrom-Json).version
+        
         $currentVersion = ""
         if (Test-Path "WidevineCdm/manifest.json") {
-            $currentManifest = Get-Content -Path "WidevineCdm/manifest.json" | ConvertFrom-Json
-            $currentVersion = $currentManifest.version
+            $currentVersion = (Get-Content -Path "WidevineCdm/manifest.json" | ConvertFrom-Json).version
         }
 
-        Write-Host "Current Version: $currentVersion"
-        Write-Host "New Version: $newVersion"
+        Write-Host "Current: $currentVersion | New: $newVersion"
 
-        # 6. Logic cập nhật
+        # 5. Thực hiện cập nhật
         if ($newVersion -ne $currentVersion -or $env:EVENT_NAME -eq "workflow_dispatch") {
-            Write-Host "Updating WidevineCdm..."
+            Write-Host "Updating files..."
             if (Test-Path "WidevineCdm") { Remove-Item -Recurse -Force "WidevineCdm" }
-            
-            # Copy thư mục mới vào root
             Copy-Item -Path $newWidevinePath.FullName -Destination "WidevineCdm" -Recurse -Force
             
-            # Git Commit & Push
+            # --- QUAN TRỌNG: DỌN DẸP TRƯỚC KHI GIT ADD ---
+            Remove-Item -Recurse -Force "temp_widevine", "7zr.exe" -ErrorAction SilentlyContinue
+            
+            # 6. Git Operations
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add WidevineCdm/
-            git commit -m "Update WidevineCdm to $newVersion [skip ci]"
-            git push origin main
+            
+            # Kiểm tra xem thực sự có thay đổi file không để tránh commit rỗng nếu không cần thiết
+            $status = git status --porcelain
+            if ($status) {
+                git commit -m "Update WidevineCdm to $newVersion"
+                git push origin main
+                Write-Host "Successfully updated to $newVersion"
+            } elseif ($env:EVENT_NAME -eq "workflow_dispatch") {
+                # Nếu chạy thủ công mà không có file đổi (chỉ ghi đè nội dung cũ), dùng --allow-empty
+                git commit --allow-empty -m "Manual rebuild WidevineCdm $newVersion"
+                git push origin main
+                Write-Host "Manual push completed (no file changes)."
+            }
         } else {
-            Write-Host "Already up to date. No changes made."
+            Write-Host "Already up to date. Cleaning up..."
+            Remove-Item -Recurse -Force "temp_widevine", "7zr.exe" -ErrorAction SilentlyContinue
         }
-
-        # 7. Cleanup
-        Remove-Item -Recurse -Force "temp_widevine", "7zr.exe" -ErrorAction SilentlyContinue
