@@ -31,7 +31,7 @@ jobs:
         }
         Write-Host "Phien ban hien tai trong Repo: $currentLocalVersion"
 
-        # 2. Lấy thông tin phiên bản mới nhất từ Repo gốc
+        # 2. Lấy thông tin phiên bản Samsung mới nhất từ Repo gốc
         $release = Invoke-RestMethod "https://api.github.com/repos/hoangxg4/samsung_browser-offline-installer/releases/latest"
         $asset = $release.assets | Where-Object { $_.name -match "SamsungInternet_Offline" } | Select-Object -First 1
         
@@ -62,13 +62,21 @@ jobs:
             git push origin :refs/tags/$tag 2>$null
         }
 
+        # --- TỰ ĐỘNG FETCH CHROME++ (version.dll) ---
+        Write-Host "Dang lay link tai Chrome++..."
+        $plusRelease = Invoke-RestMethod "https://api.github.com/repos/bibicadotnet/Chromium_SetDLL/releases/latest"
+        $plusUrl = ($plusRelease.assets | Where-Object { $_.name -like "Chrome*.7z" } | Select-Object -First 1).browser_download_url
+
         # 4. Tai file va cong cu
         curl.exe -sSL https://www.7-zip.org/a/7zr.exe -o 7zr.exe
         Write-Host "Dang tai bo cai Samsung..."
         Invoke-WebRequest -Uri $downloadUrl -OutFile samsung.zip -UserAgent "SamsungBrowser"
         
+        Write-Host "Dang tai Chrome++..."
+        Invoke-WebRequest -Uri $plusUrl -OutFile chrome_plus.7z
+
         # 5. Giai nen da tang
-        Write-Host "Dang giai nen..."
+        Write-Host "Dang giai nen bo cai Samsung..."
         New-Item -ItemType Directory -Force -Path "temp_work" | Out-Null
         Expand-Archive -Path samsung.zip -DestinationPath "temp_work\l1" -Force
         $mini = Get-ChildItem -Path "temp_work\l1" -Filter "mini_installer.exe" -Recurse | Select-Object -First 1
@@ -76,6 +84,9 @@ jobs:
         $sevenZ = Get-ChildItem -Path "temp_work\l2" -Filter "*.7z" -Recurse | Select-Object -First 1
         & .\7zr.exe x $sevenZ.FullName "-otemp_work\extracted" -y | Out-Null
         
+        Write-Host "Dang giai nen Chrome++..."
+        & .\7zr.exe x chrome_plus.7z "-otemp_plus" -y | Out-Null
+
         # Tim thu muc Chrome-bin thuc te
         $sourceDir = Get-ChildItem -Path "temp_work\extracted" -Directory -Recurse | Where-Object { $_.Name -eq "Chrome-bin" } | Select-Object -First 1
         
@@ -87,8 +98,16 @@ jobs:
         # Di chuyen loi trinh duyet
         Move-Item -Path "$($sourceDir.FullName)\*" -Destination $browserDir -Force
         
+        # COPY version.dll x64 tu bo cai Chrome++ vao trinh duyet
+        $dll = Get-ChildItem -Path "temp_plus" -Recurse -Filter "version.dll" | Where-Object { $_.FullName -match '\\x64\\App\\' } | Select-Object -First 1
+        if ($dll) {
+            Write-Host "Da copy version.dll tu Repo Chrome++!"
+            Copy-Item $dll.FullName $browserDir -Force
+        } else {
+            Write-Warning "Khong tim thay version.dll x64!"
+        }
+
         # 7. XU LY ENCODING VA COPY FILE CONFIG (Fix loi font)
-        # Liet ke cac file can fix encoding tu Repo cua ban
         $configFiles = @("default-apps-multi-profile.bat", "update.bat", "chrome++.ini", "debloater.reg")
         
         foreach ($file in $configFiles) {
@@ -97,7 +116,6 @@ jobs:
                 $content = Get-Content -Path $file -Raw
                 $destPath = Join-Path $browserDir $file
                 
-                # .bat va .reg dung ASCII de CMD doc chuan, .ini dung UTF8
                 if ($file.EndsWith(".bat") -or $file.EndsWith(".reg")) {
                     $content | Out-File -FilePath $destPath -Encoding ascii -Force
                 } else {
@@ -105,9 +123,6 @@ jobs:
                 }
             }
         }
-
-        # Copy file nhi phan neu co
-        if (Test-Path "version.dll") { Copy-Item "version.dll" $browserDir -Force }
         
         # Tao thu muc du lieu nguoi dung
         New-Item -Force -Type Directory (Join-Path $browserDir "Data") | Out-Null
@@ -118,7 +133,7 @@ jobs:
         Compress-Archive -Path "$portableRoot/*" -DestinationPath $zipName -Force
 
         # 9. Don dep rác
-        Remove-Item 7zr.exe, samsung.zip, temp_work, $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item 7zr.exe, samsung.zip, chrome_plus.7z, temp_work, temp_plus, $portableRoot -Recurse -Force -ErrorAction SilentlyContinue
 
         # Gui du lieu sang cac buoc sau
         echo "tag=$tag" >> $env:GITHUB_OUTPUT
@@ -147,6 +162,8 @@ jobs:
         body: |
           📥 **Samsung Browser Portable v${{ steps.build_step.outputs.version }}**
           
+          *(Tích hợp sẵn Chrome++ phiên bản mới nhất)*
+
           ### Hướng dẫn:
           1. Tải file ZIP bên dưới và giải nén.
           2. Vào thư mục `Samsung_Browser`.
@@ -158,4 +175,4 @@ jobs:
           - `debloater.reg`: Tối ưu hóa quyền riêng tư và hiệu năng.
           
           ---
-          *Build tự động bởi CezDev Bot*
+          *Build tự động bởi GitHub Actions*
