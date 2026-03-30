@@ -11,7 +11,10 @@ echo $apiUrl = "https://api.github.com/repos/hoangxg4/samsung_browser-portable/r
 echo $tempDir = Join-Path $env:TEMP "SamsungBrowserUpdate"
 echo.
 echo try {
-echo    $currentVersion = if ^(Test-Path $browserExe^) { ^(Get-Item $browserExe^).VersionInfo.ProductVersion } else { "Not installed" }
+echo    # Tim thu muc phien ban (vd: 143.0.0.95) thay vi doc file exe
+echo    $versionDir = Get-ChildItem -Path "%~dp0" -Directory ^| Where-Object { $_.Name -match "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" } ^| Sort-Object { [System.Version]$_.Name } -Descending ^| Select-Object -First 1
+echo    $currentVersion = if ^($versionDir^) { $versionDir.Name } else { "Not installed" }
+echo.
 echo    $allReleases = Invoke-RestMethod -Uri $apiUrl
 echo    $channelReleases = $allReleases ^| Where-Object { $_.tag_name -like "v*" }
 echo    $latestRelease = $channelReleases ^| Sort-Object { if ^($_.tag_name -match "([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"^) { [System.Version]$matches[1] } else { [System.Version]"0.0.0.0" } } -Descending ^| Select-Object -First 1
@@ -47,13 +50,18 @@ echo.
 echo    Write-Host "Updating files..."
 echo    if ^(Test-Path "samsunginternet.exe"^) { Remove-Item "samsunginternet.exe" -Force }
 echo    if ^(Test-Path "version.dll"^) { Remove-Item "version.dll" -Force }
-echo    if ^(Test-Path $currentVersion^) { Remove-Item $currentVersion -Recurse -Force }
+echo.
+echo    # Xoa thu muc phien ban cu tranh rac he thong
+echo    if ^($currentVersion -ne "Not installed"^) {
+echo      $oldVersionPath = Join-Path "%~dp0" $currentVersion
+echo      if ^(Test-Path $oldVersionPath^) { Remove-Item $oldVersionPath -Recurse -Force }
+echo    }
 echo.
 echo    Get-ChildItem $extractedDir.FullName -Recurse ^| ForEach-Object {
 echo      $relativePath = $_.FullName.Substring^($extractedDir.FullName.Length + 1^)
 echo      $destPath = Join-Path $currentDir $relativePath
 echo      if ^($_.PSIsContainer^) {
-echo        New-Item -ItemType Directory -Path $destPath -Force ^| Out-Null
+echo        if ^(-not ^(Test-Path $destPath^)^) { New-Item -ItemType Directory -Path $destPath -Force ^| Out-Null }
 echo      } else {
 echo        $protectedFiles = @^("chrome++.ini","debloater.reg","default-apps-multi-profile.bat","update.bat"^)
 echo        if ^($_.Name -in $protectedFiles -and ^(Test-Path $destPath^)^) {
@@ -67,7 +75,11 @@ echo      }
 echo    }
 echo.
 echo    Remove-Item $tempDir -Recurse -Force
-echo    $newCurrentVersion = if ^(Test-Path $browserExe^) { ^(Get-Item $browserExe^).VersionInfo.ProductVersion } else { "Not installed" }
+echo.
+echo    # Check lai phien ban sau khi cai dat tu ten thu muc
+echo    $newVersionDir = Get-ChildItem -Path "%~dp0" -Directory ^| Where-Object { $_.Name -match "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" } ^| Sort-Object { [System.Version]$_.Name } -Descending ^| Select-Object -First 1
+echo    $newCurrentVersion = if ^($newVersionDir^) { $newVersionDir.Name } else { "Not installed" }
+echo.
 echo    if ^($newCurrentVersion -eq $latestVersion^) {
 echo      Write-Host "Update completed successfully! Version: $newCurrentVersion" -ForegroundColor Green
 echo    } else {
