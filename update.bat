@@ -11,7 +11,7 @@ echo $apiUrl = "https://api.github.com/repos/hoangxg4/samsung_browser-portable/r
 echo $tempDir = Join-Path $env:TEMP "SamsungBrowserUpdate"
 echo.
 echo try {
-echo    # Tim thu muc phien ban (vd: 143.0.0.95) thay vi doc file exe
+echo    # Tim thu muc phien ban ^(vd: 143.0.0.95^) thay vi doc file exe
 echo    $versionDir = Get-ChildItem -Path "%~dp0" -Directory ^| Where-Object { $_.Name -match "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" } ^| Sort-Object { [System.Version]$_.Name } -Descending ^| Select-Object -First 1
 echo    $currentVersion = if ^($versionDir^) { $versionDir.Name } else { "Not installed" }
 echo.
@@ -25,7 +25,7 @@ echo    Write-Host "Current version: $currentVersion" -ForegroundColor Yellow
 echo    Write-Host "Latest version: $latestVersion" -ForegroundColor Yellow
 echo    Write-Host
 echo.
-echo    $confirm = Read-Host "Do you want to update? (y/N)"
+echo    $confirm = Read-Host "Do you want to update? [y/N]"
 echo    if ^($confirm -ne 'y' -and $confirm -ne 'Y'^) { exit }
 echo.
 echo    if ^(Test-Path $browserExe^) {
